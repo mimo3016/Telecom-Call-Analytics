@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Call analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f5f6f8; --panel:#fff; --ink:#18212b; --muted:#5d6b7a; --line:#dde2e8; --accent:#0f6e8c; --warn:#b4400f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141a21; --panel:#1b232c; --ink:#e6ebf0; --muted:#94a3b3; --line:#2b3642; --accent:#4fb3d1; --warn:#f08a5d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 "IBM Plex Sans", system-ui, sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:28px 20px 48px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:16px; margin:0 0 12px; }
+  .sub { color:var(--muted); margin:0 0 24px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:20px; }
+  .kpi { background:var(--panel); border:1px solid var(--line); padding:14px 16px; border-radius:6px; }
+  .kpi b { display:block; font-size:24px; font-weight:600; }
+  .kpi span { color:var(--muted); font-size:13px; }
+  .kpi.warn b { color:var(--warn); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:18px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:2fr 1fr; gap:20px; }
+  .tables { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:800px) { .grid, .tables { grid-template-columns:1fr; } }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:7px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:400; }
+  td.num, th.num { text-align:right; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Call analytics</h1>
+  <p class="sub">Last 90 days of simulated call records.</p>
+
+  <section class="kpis" id="kpis"></section>
+
+  <div class="grid">
+    <section class="panel"><h2>When people call</h2><canvas id="hourly" height="150"></canvas></section>
+    <section class="panel"><h2>Revenue by plan (DA)</h2><canvas id="plans" height="150"></canvas></section>
+  </div>
+
+  <div class="tables">
+    <section class="panel scroll"><h2>Top customers by spend</h2><table id="top"></table></section>
+    <section class="panel scroll"><h2 id="risk-title">Customers at risk</h2><table id="risk"></table></section>
+  </div>
+</main>
+
+<script>
+const fmt = n => Number(n).toLocaleString("en-GB");
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+function table(el, cols, rows) {
+  el.innerHTML = "<tr>" + cols.map(c => `<th class="${c.num ? "num" : ""}">${c.label}</th>`).join("") + "</tr>" +
+    rows.map(r => "<tr>" + cols.map(c => `<td class="${c.num ? "num" : ""}">${c.num ? fmt(r[c.key]) : r[c.key]}</td>`).join("") + "</tr>").join("");
+}
+
+fetch("/api/dashboard").then(r => r.json()).then(d => {
+  const k = d.kpis;
+  document.getElementById("kpis").innerHTML = [
+    [fmt(k.active_customers), "customers with calls"],
+    [fmt(k.total_calls), "calls"],
+    [fmt(k.total_minutes), "minutes talked"],
+    [fmt(k.revenue_da) + " DA", "revenue"],
+    [k.churn_rate + "%", `inactive for ${d.inactive_days}+ days`, "warn"],
+  ].map(([v, l, c]) => `<div class="kpi ${c || ""}"><b>${v}</b><span>${l}</span></div>`).join("");
+
+  new Chart(document.getElementById("hourly"), {
+    type: "bar",
+    data: { labels: d.hourly.map(h => h.hour + ":00"), datasets: [{ data: d.hourly.map(h => h.calls), backgroundColor: css("--accent") }] },
+    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { maxTicksLimit: 12 } } } }
+  });
+  new Chart(document.getElementById("plans"), {
+    type: "bar",
+    data: { labels: d.by_plan.map(p => p.plan), datasets: [{ data: d.by_plan.map(p => p.revenue_da), backgroundColor: css("--accent") }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } } }
+  });
+
+  table(document.getElementById("top"),
+    [{key:"name",label:"Name"},{key:"wilaya",label:"Wilaya"},{key:"calls",label:"Calls",num:1},{key:"spend_da",label:"Spend (DA)",num:1}], d.top_customers);
+  document.getElementById("risk-title").textContent = `Customers silent for over ${d.inactive_days} days`;
+  table(document.getElementById("risk"),
+    [{key:"name",label:"Name"},{key:"plan",label:"Plan"},{key:"days_inactive",label:"Days silent",num:1}], d.at_risk);
+});
+</script>
+</body>
+</html>
